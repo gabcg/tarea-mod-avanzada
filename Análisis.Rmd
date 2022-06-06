@@ -103,6 +103,17 @@ data = datos)
 
 m.gam1
 summary(m.gam1)
+
+```
+
+```{r}
+m.gam1r <- gamm(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y),
+               random=list(Age=~1),
+               family = binomial(),
+               data = datos)
+
+m.gam1r
+summary(m.gam1r$lme)
 ```
 
 
