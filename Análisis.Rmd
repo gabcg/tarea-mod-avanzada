@@ -23,7 +23,7 @@ datos <- read.csv("./datos/data_galicia.txt", sep = " ")
 ## Análisis previo
 
 ```{r}
-create_report(datos, y = "Y", output_file = "otros/analisis-prev.html")
+create_report(datos, y = "Y", output_file = "./otros/analisis-prev.html")
 
 # Posible distribución de Y
 fit.cont(datos$Y)
