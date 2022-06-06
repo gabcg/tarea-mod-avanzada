@@ -7,11 +7,37 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(DataExplorer)
+library(outliers) # para el test de Grubbs
+library(rriskDistributions)
 ```
 
 ## Carga de datos
 
 ```{r}
-
+datos <- read.csv()
 ```
 
+
+## Análisis previo
+
+```{r}
+create_report(datos, y = "Y", output_file = "otros/analisis-prev.html")
+
+# Posible distribución de Y
+fit.cont(datos$Y)
+```
+
+```{r}
+# Exploración de variables mediante `pairs()`
+ggpairs(datos)
+```
+
+```{r}
+# Análisis de outliers
+(test <- grubbs.test(datos$))
+(test <- grubbs.test(datos$))
+(test <- grubbs.test(datos$))
+(test <- grubbs.test(datos$))
+```
