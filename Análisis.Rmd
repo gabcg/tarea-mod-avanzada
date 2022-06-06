@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(DataExplorer)
 library(outliers) # para el test de Grubbs
 library(rriskDistributions)
+library(mgcv)
 ```
 
 ## Carga de datos
@@ -23,7 +24,9 @@ datos <- read.csv("./datos/data_galicia.txt", sep = " ")
 ## Análisis previo
 
 ```{r}
-create_report(datos, y = "Y", output_file = "./otros/analisis-prev.html")
+create_report(datos, y = "InfFasc", output_file = "./otros/analisis-prev.html")
+datos$InfFasc <- as.factor(datos$InfFasc)
+datos$Aptitude <- as.factor(datos$Aptitude)
 
 # Posible distribución de Y
 fit.cont(datos$Y)
@@ -41,3 +44,81 @@ ggpairs(datos)
 (test <- grubbs.test(datos$))
 (test <- grubbs.test(datos$))
 ```
+
+## GLM
+
+```{r}
+m.glm.t <- glm(InfFasc ~ .,
+               family=binomial(),
+               data = datos)
+
+summary(m.glm.t)
+```
+
+```{r}
+step(m.glm.t)
+```
+
+```{r}
+m.glm2 <- glm(formula = InfFasc ~ X + Y + Aptitude + Temperature + Altitude, 
+    family = binomial(), data = datos)
+summary(m.glm2)
+```
+
+```{r}
+library(glmulti)
+multi <- glmulti(m.glm2, crit = aic, family = binomial())
+```
+
+```{r}
+m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + s(Age) + s(Temperature) + s(Rainfall) + s(Altitude) + s(Slope) + s(Density),
+              family = binomial(),
+              data = datos)
+
+m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + Age + s(Temperature) + Rainfall + s(Altitude) + Slope + s(Density),
+              family = binomial(),
+              data = datos)
+
+summary(m.gam.t)
+
+m.gam.t <- gam(InfFasc ~ s(X, Y, k = 35) + Aptitude + Age + s(Temperature, k = 15 ) + Rainfall + s(Altitude) + Slope + s(Density),
+              family = binomial(),
+              data = datos)
+
+summary(m.gam.t)
+
+m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + Temperature + s(Altitude),
+              family = binomial(),
+              data = datos)
+
+summary(m.gam.t)
+```
+
+## GAM
+
+```{r}
+m.gam1 <- gam(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y),
+family = binomial(),
+data = datos)
+
+m.gam1
+summary(m.gam1)
+```
+
+
+```{r}
+m.gam1 <- gam(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y, k = 20),
+family = binomial(),
+data = datos)
+
+m.gam1
+summary(m.gam1)
+```
+
+
+
+
+```{r}
+gam.check(m.gam1)
+```
+
