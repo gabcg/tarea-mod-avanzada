@@ -1,0 +1,17 @@
+---
+title: "Análisis"
+author: "Varios"
+date: "6/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Carga de datos
+
+```{r}
+
+```
+
