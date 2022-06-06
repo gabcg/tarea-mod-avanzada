@@ -16,7 +16,7 @@ library(rriskDistributions)
 ## Carga de datos
 
 ```{r}
-datos <- read.csv()
+datos <- read.csv("./datos/data_galicia.txt", sep = " ")
 ```
 
 
