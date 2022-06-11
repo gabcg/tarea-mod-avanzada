@@ -1,0 +1,149 @@
+---
+title: "Modelización de la presencia de *Fasciola hepatica* en granjas de vacuno gallegas"
+author: "Gabriel Carbonell, Zaira García, Celia Sifre"
+date: "6/11/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE,
+                      echo = FALSE,
+                      fig.align = "center")
+
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(mgcv)
+
+# Carga de los datos
+datos <- read.csv("./datos/data_galicia.txt", sep = " ")
+datos$Aptitude <- as.factor(datos$Aptitude)
+datos$InfFasc <- as.factor(datos$InfFasc)
+
+attach(datos)
+```
+
+
+## Introducción
+
+La *Fasciola hepatica* es un gusano parásito con ciclo biológico de dos generaciones en dos hospedadores distintos: un molusco (como los caracoles) y un mamífero. Su presencia o ausencia es dependiente de las condiciones geográficas y climatológicas, además del estado de salud del animal. Para su prevención existen métodos faracológicos, químicos y de alteración del entorno.
+
+Se puede tratar de modelizar la presencia o ausencia de dicho parásito a partir de la información obtenida sobre 400 granjas de vacuno gallegas. Concretamente, se cuenta con diez variables relativas a información geográfica y climatológica de dichas granjas, además de su densidad y el tipo de vaca.
+
+## Descripción de los datos
+
+Realizaremos un análisis descriptivo del conjunto de datos que se empleará. Como se ha mencionado, contiene 400 observaciones relativas a 10 variables, las cuales se especifican a continuación.
+
+**Variable respuesta:**
+
+* `InfFasc`: presencia o ausencia del parásito *Fasciola hepatica* (0 = no, 1 = sí; binaria).
+
+**Variables explicativas:**
+
+* `Age`: edad de la vaca, en años (cuantitativa).
+* `Aptitude`: un factor de dos niveles que define si la vaca se dedica a la producción de leche (L) o de carne (C) (categórica nominal).
+* `Rainfall`: pluviometría de la granja (cuantitativa continua).
+* `Altitude`: altitud a la que se encuentra la granja (cuantitativa continua).
+* `Slope`: pendiente en el punto en que se encuentra la granja (cuantitativa continua).
+* `Density`: densidad de la granja (cuantitativa continua).
+* `X` e `Y`: se trata de las coordenadas geográficas de la granja (cuantitativa continua).
+
+Empezaremos con un análisis descriptivo numérico:
+
+```{r}
+summary(datos[, c(1, 2, 4, 6, 7, 8, 9, 10)])
+summary(datos[, -c(1, 2, 4, 6, 7, 8, 9, 10)])
+```
+
+También podemos realizar un análisis descriptivo gráfico. En primer lugar, generamos un gráfico de tipo *pairs*, incluyendo la correlación entre variables.
+
+```{r fig.height=5, fig.width=8}
+ggpairs(datos)
+```
+
+Se observa como las correlaciones más altas se dan entre:
+
+* la longitud (X) con la temperatura (< -0.6), la pluviometría (< -0.9) y la altitud (> 0.5).
+* La temperatura con la pluviometría y la altitud.
+* La pluviometría con la altitud.
+
+Por otra parte, si nos fijamos en los diagramas de cajas entre la variable respuesta y la explicativa, vemos que la media suele ser parecida excepto en el caso de la pluviometría, lo cual podría deberse al hecho de que la presencia de agua es imprescindible en el ciclo vital del parásito.
+
+```{r out.width="75%"}
+par(mfrow=c(1,2))
+
+plot(as.numeric(Age), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Edad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Age)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Temperature), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Temperatura",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Temperature)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+```
+
+Por último, si se valora la relación media de la variable respuesta con respecto a las variables respuesta, las variables con un compotamiento más destacable son la edad de las vacas y la temperatura. Como vemos, a medida que aumenta la edad, la probabilidad de la presencia del parásito crece, pero a los 16 baja y luego tiene una bajada abrupta. Una razón posible sería que la presencia del parásito reduce la esperanza de vida de las vacas. En el caso de temperatura, a medida que esta aumenta decrece la presencia media del parásito. Esto se debe a que los aumentos de tempeatura correlacionan con el aumento de temperatura del agua y su evaporación, reduciendo la viabilidad del parásito en su estado larvario. Se pueden encontrar los gráficos de este tipo con respecto a todas las variables cuantitativas en el material suplementario.
+
+\newpage
+
+## Material suplementario
+
+## Figuras
+
+```{r fig.height=7.5, fig.width=6.5}
+par(mfrow=c(3,2))
+
+plot(as.numeric(Age), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Edad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Age)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Temperature), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Temperatura",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Temperature)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Rainfall), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Pluviometría",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Rainfall)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Altitude), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Altitud",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Altitude)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Slope), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Pendiente",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Slope)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Density), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Densidad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Density)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+```
+
+### Código
+
+```{r echo=TRUE}
+
+```
+
