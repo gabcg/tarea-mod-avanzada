@@ -17,119 +17,265 @@ library(mgcv)
 ## Carga de datos
 
 ```{r}
-datos <- read.csv("./datos/data_galicia.txt", sep = " ")
+datos <- read.csv("datos/data_galicia.txt", sep = " ")
 ```
 
 
 ## Análisis previo
 
 ```{r}
-create_report(datos, y = "InfFasc", output_file = "./otros/analisis-prev.html")
 datos$InfFasc <- as.factor(datos$InfFasc)
 datos$Aptitude <- as.factor(datos$Aptitude)
-
-# Posible distribución de Y
-fit.cont(datos$Y)
+str(datos)
 ```
 
 ```{r}
 # Exploración de variables mediante `pairs()`
-ggpairs(datos)
+library(psych)
+pairs.panels(datos,
+             method = "pearson", # correlation method
+             density = TRUE, # show density plots
+             ellipses = FALSE # show correlation ellipses
+)
 ```
+
+
+## GLM zai
+
 
 ```{r}
-# Análisis de outliers
-(test <- grubbs.test(datos$))
-(test <- grubbs.test(datos$))
-(test <- grubbs.test(datos$))
-(test <- grubbs.test(datos$))
+glm1 <- glm(InfFasc ~ ., data=datos, family = binomial(link="logit"))
+glm1q <- glm(InfFasc ~ ., data=datos, family = quasibinomial(link="logit"))
+glm2 <- glm(InfFasc ~ ., data=datos, family = binomial(link="probit"))
+glm3 <- glm(InfFasc ~ ., data=datos, family = binomial(link="cloglog"))
+c(AIC(glm1), AIC(glm2), AIC(glm3))
+
+summary(glm1)
+par(mfrow=c(2,2)); plot(glm1); par(mfrow=c(1,1))
 ```
 
-## GLM
+Las variables X, Age, Slope y Density no son significativas con el GLM. Probaremos a suavizarlas.
+
+Hacemos un step:
 
 ```{r}
-m.glm.t <- glm(InfFasc ~ .,
-               family=binomial(),
-               data = datos)
-
-summary(m.glm.t)
+maximo <- glm(InfFasc ~ Age + Aptitude + Temperature + Altitude + Rainfall
+              + Slope + Density, family = binomial("logit"), data = datos)
+minimo <- glm(InfFasc ~ 1, family = binomial("logit"), data = datos)
+ajuste.step1 <- step(maximo, direction = "backward", scope = minimo)
+ajuste.step1$coefficients
+ajuste.step1$aic
 ```
+
+Según el step nos quedaríamos con las variables Y, Aptitude, Temperature y Rainfall.
 
 ```{r}
-step(m.glm.t)
+glmf <- glm(InfFasc ~ Aptitude + Temperature + Rainfall, data=datos, 
+            family = binomial(link="logit"))
+summary(glmf)
 ```
 
-```{r}
-m.glm2 <- glm(formula = InfFasc ~ X + Y + Aptitude + Temperature + Altitude, 
-    family = binomial(), data = datos)
-summary(m.glm2)
-```
+Hacemos un glmmulti con las covariables que nos ha  devuelto step
 
 ```{r}
 library(glmulti)
-multi <- glmulti(m.glm2, crit = aic, family = binomial())
+glmmulti <- glmulti(InfFasc ~  Aptitude + Temperature + Rainfall,
+                    family = binomial("logit"), data = datos, crit = "aic")
+summary(glmmulti)$bestmodel
+m.glmmulti <- glm(InfFasc ~ 1 + Aptitude + Rainfall:Temperature, 
+                  family = binomial("logit"), data = datos)
 ```
 
 ```{r}
-m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + s(Age) + s(Temperature) + s(Rainfall) + s(Altitude) + s(Slope) + s(Density),
-              family = binomial(),
-              data = datos)
-
-m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + Age + s(Temperature) + Rainfall + s(Altitude) + Slope + s(Density),
-              family = binomial(),
-              data = datos)
-
-summary(m.gam.t)
-
-m.gam.t <- gam(InfFasc ~ s(X, Y, k = 35) + Aptitude + Age + s(Temperature, k = 15 ) + Rainfall + s(Altitude) + Slope + s(Density),
-              family = binomial(),
-              data = datos)
-
-summary(m.gam.t)
-
-m.gam.t <- gam(InfFasc ~ s(X, Y) + Aptitude + Temperature + s(Altitude),
-              family = binomial(),
-              data = datos)
-
-summary(m.gam.t)
+glmf <- glm(InfFasc ~ 1 + Aptitude + Rainfall:Temperature, data=datos, 
+            family = binomial(link="logit"))
+summary(glmf)
 ```
 
-## GAM
+## test validación
 
 ```{r}
-m.gam1 <- gam(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y),
-family = binomial(),
-data = datos)
-
-m.gam1
-summary(m.gam1)
-
-```
-
-```{r}
-m.gam1r <- gamm(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y),
-               random=list(Age=~1),
-               family = binomial(),
-               data = datos)
-
-m.gam1r
-summary(m.gam1r$lme)
+library(ResourceSelection)
+#con el modelo completo
+hoslem.test(as.numeric(as.character(datos$InfFasc)), fitted(glm1))
+#con el modelo step
+hoslem.test(as.numeric(as.character(datos$InfFasc)), fitted(glmf))
+#con el modelo glmmulti
+hoslem.test(as.numeric(as.character(datos$InfFasc)), fitted(m.glmmulti))
 ```
 
 
-```{r}
-m.gam1 <- gam(InfFasc ~ Aptitude + Temperature + s(Altitude) + s(X, Y, k = 20),
-family = binomial(),
-data = datos)
+## GAM zai
 
-m.gam1
-summary(m.gam1)
+Hacemos un modelo GAM completo con las variables suavizadas que no incluía STEP y además metemos el suavizado bivariante de las coordenadas.
+
+```{r}
+library(mgcv)
+gam1 <- gam(InfFasc ~ s(X, Y) + Aptitude + Temperature + Altitude + s(Rainfall) + s(Age) +
+            s(Slope) + s(Density), data=datos, family = binomial(link="logit"))
+summary(gam1)
+```
+
+Quitamos Age y Slope que no son significativas.
+
+```{r}
+gam2 <- gam(InfFasc ~ s(X, Y) + Aptitude + Temperature + Altitude + s(Rainfall) + s(Density),
+            data=datos, family = binomial(link="logit"))
+summary(gam2)
+```
+
+No tenemos que suavizar ni Rainfall ni Density, probamos a meterlas en el modelo sin suavizar.
+
+```{r}
+gam3 <- gam(InfFasc ~ s(X, Y) + Aptitude + Temperature + Altitude + Rainfall + Density,
+            data=datos, family = binomial(link="logit"))
+summary(gam3)
+```
+Quitamos Rainfall y Density
+
+
+```{r}
+gam4 <- gam(InfFasc ~ s(X, Y) + Altitude + Aptitude,
+            data=datos, family = binomial(link="logit"))
+summary(gam4)
+```
+
+
+```{r}
+gam5 <- gam(InfFasc ~ s(X,Y) + s(Age) + Aptitude + s(Temperature) + s(Rainfall) 
+            + s(Altitude) + s(Slope) + s(Density), data=datos, family = binomial(link="logit"))
+summary(gam5)
+```
+
+```{r}
+gam6 <- gam(InfFasc ~ s(X,Y) + Aptitude + s(Temperature)  
+            + s(Altitude) + s(Density), data=datos, family = binomial(link="logit"))
+summary(gam6)
+```
+
+```{r}
+gam7 <- gam(InfFasc ~ s(X,Y) + Aptitude + s(Temperature)  
+            + s(Altitude) , data=datos, family = binomial(link="logit"))
+summary(gam7)
+```
+
+```{r}
+gam8 <- gam(InfFasc ~ s(X,Y) + Aptitude 
+            + s(Altitude) , data=datos, family = binomial(link="logit"))
+summary(gam8)
+```
+
+```{r}
+gam9 <- gam(InfFasc ~ s(X,Y) + Aptitude  +Altitude , data=datos, 
+            family = binomial(link="logit"))
+summary(gam9)
+```
+
+## GAMM zai
+
+NO CONSIDERO QUE HAYA EFECTOS ALEATORIOS
+
+Analizamos si tenemos efectos aleatorios
+
+```{r}
+library(ggplot2)
+ggplot(data=datos, aes(x=Age,y=InfFasc, group = Aptitude))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE)
+
+ggplot(data=datos, aes(x=Rainfall,y=InfFasc, group = Aptitude))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE)
+
+ggplot(data=datos, aes(x=Temperature,y=InfFasc, group = Aptitude))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE)
+
+ggplot(data=datos, aes(x=Density,y=InfFasc, group = Aptitude))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE)
+```
+
+Probamos a meter efectos aleatorios
+
+```{r}
+library(mgcv)
+gamm1 <- gamm(InfFasc ~ s(X, Y) + Altitude + Aptitude , 
+              random = list(Age=~Altitude), 
+                  family = binomial(link="logit"), data=datos)
+summary(gamm1$lme)
+summary(gamm1$gam)
+```
+```{r}
+library(mgcv)
+gamm1 <- gamm(InfFasc ~ s(X, Y) + s(Altitude) + Aptitude, random = list(Density=~1), 
+                  family = binomial(link="logit"), data=datos)
+summary(gamm1$lme)
+summary(gamm1$gam)
+```
+
+
+## Gam 09/06
+
+```{r}
+library(mgcv)
+modgam <- gamm(InfFasc ~ te(X,Y) + s(Altitude) + Aptitude + s(Temperature,bs="cr"),
+               random = list(Age =~1)
+              , family = binomial("logit"), 
+              data=datos)
+summary(modgam)
 ```
 
 
 
+Planteamos un modelo GAM con las variables Altitude y Temperature con suavizado bivariante también:
 
 ```{r}
-gam.check(m.gam1)
+library(mgcv)
+modgam <- gam(InfFasc ~ te(X,Y) + s(Altitude, Temperature) + Aptitude + s(Rainfall)
+              , family = binomial("logit"), 
+              data=datos)
+summary(modgam)
+```
+
+## Modelo GAM dia 13  
+
+```{r}
+library(mgcv)
+#este es el modelo de luis
+modgam1 <- gam(InfFasc ~ te(X,Y) + te(Altitude, Temperature)  + Aptitude
+               +s(Density),
+              family = binomial("logit"), 
+              data=datos)
+summary(modgam1)
+```
+
+## modelo gam
+
+```{r}
+#este es el modelo de cris
+modelo1 <- gam(InfFasc ~ s(X,Y)  + Aptitude + Altitude,
+              family = binomial("logit"), 
+              data=datos)
+summary(modelo1)
+```
+
+```{r}
+modgam1 <- gam(InfFasc ~ te(X,Y) + s(Altitude, Temperature)  + Aptitude,
+              family = binomial("logit"), 
+              data=datos)
+summary(modgam1)
+```
+
+
+## Glmulti gabriel
+
+
+```{r}
+glmg <- glm(InfFasc ~ Temperature + Rainfall:Temperature + Aptitude:Temperature,
+              family = binomial("logit"), 
+              data=datos)
+summary(glmg)
+100 * (1 - (glmg$deviance/glmg$null.deviance))
 ```
 
