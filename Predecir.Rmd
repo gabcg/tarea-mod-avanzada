@@ -1,0 +1,75 @@
+---
+title: "CV ROC"
+author: "Gabriel Carbonell"
+date: "6/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(caret)
+library(boot)
+```
+
+## R Markdown
+
+```{r}
+ajuste.gam1 <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=datos, 
+                  family = binomial(link="logit"))
+ajuste.step <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos, 
+            family = binomial(link="logit"))
+```
+
+
+
+```{r}
+# Dividimos los datos
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+```
+
+```{r}
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=test, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data=result, reference = test$InfFasc)
+```
+
+```{r}
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data = result.glm, reference = test$InfFasc)
+```
+
+
+## Con `cv.glm`
+
+```{r}
+set.seed(123)
+cost <- function(r, pi = 0) mean(abs(r-pi) > 0.5)
+
+result.cv.glm <- cv.glm(datos, ajuste.step, K=8)
+result.cv.glm.2 <- cv.glm(datos, ajuste.step, K=8, cost = cost)
+
+result.cv.gam <- cv.glm(datos, ajuste.gam1, K=8)
+result.cv.gam.2 <- cv.glm(datos, ajuste.gam1, K=8, cost = cost)
+
+result.cv.glm$delta
+result.cv.gam$delta
+
+result.cv.glm.2$delta
+result.cv.gam.2$delta
+```
+
