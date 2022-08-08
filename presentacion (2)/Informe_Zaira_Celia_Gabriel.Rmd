@@ -1,0 +1,499 @@
+---
+title: "Modelización de la presencia de *Fasciola hepatica* en granjas de vacuno gallegas"
+author: "Gabriel Carbonell, Zaira García, Celia Sifre"
+date: "16/6/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE,
+                      echo = FALSE,
+                      fig.align = "center")
+
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(mgcv)
+library(psych)
+library(knitr)
+library(R2WinBUGS)
+library(caret)
+library(pROC)
+
+# Carga de los datos
+datos <- read.csv("data_galicia.txt", sep = " ")
+datos$Aptitude <- as.factor(datos$Aptitude)
+datos$InfFasc <- as.factor(datos$InfFasc)
+
+attach(datos)
+```
+
+
+## Introducción
+
+La *Fasciola hepatica* es un gusano parásito con ciclo biológico de dos generaciones en dos hospedadores distintos: un molusco (como los caracoles) y un mamífero. Su presencia o ausencia es dependiente de las condiciones geográficas y climatológicas, además del estado de salud del animal. Para su prevención existen métodos faracológicos, químicos y de alteración del entorno.
+
+Se puede tratar de modelizar la presencia o ausencia de dicho parásito a partir de la información obtenida sobre 400 granjas de vacuno gallegas. Concretamente, se cuenta con diez variables relativas a información geográfica y climatológica de dichas granjas, además de su densidad y el tipo de vaca.
+
+## Descripción de los datos
+
+Realizaremos un análisis descriptivo del conjunto de datos que se empleará. Como se ha mencionado, contiene 400 observaciones relativas a 10 variables, las cuales se especifican a continuación.
+
+**Variable respuesta:**
+
+* `InfFasc`: presencia o ausencia del parásito *Fasciola hepatica* (0 = no, 1 = sí; binaria).
+
+**Variables explicativas:**
+
+* `Age`: edad de la vaca, en años (cuantitativa discreta).
+* `Aptitude`: un factor de dos niveles que define si la vaca se dedica a la producción de leche (L) o de carne (C) (categórica nominal).
+* `Rainfall`: pluviometría de la granja (cuantitativa continua).
+* `Altitude`: altitud a la que se encuentra la granja (cuantitativa continua).
+* `Slope`: pendiente en el punto en que se encuentra la granja (cuantitativa continua).
+* `Density`: densidad de la granja (cuantitativa continua).
+* `X` e `Y`: se trata de las coordenadas geográficas de la granja (cuantitativa continua).
+
+Empezaremos con un análisis descriptivo numérico:
+
+\footnotesize
+```{r}
+summary(datos[, c(1, 2, 4, 6, 7, 8, 9, 10)])
+summary(datos[, -c(1, 2, 4, 6, 7, 8, 9, 10)])
+```
+\normalsize
+También podemos realizar un análisis descriptivo gráfico. En primer lugar, generamos un gráfico de tipo *pairs*, incluyendo la correlación entre variables.
+
+```{r fig.height=5, fig.width=8}
+ggpairs(datos)
+```
+
+Se observa como las correlaciones más altas se dan entre:
+
+* la longitud (X) con la temperatura (< -0.6), la pluviometría (< -0.9) y la altitud (> 0.5).
+* La temperatura con la pluviometría y la altitud.
+* La pluviometría con la altitud.
+
+Por otra parte, si nos fijamos en los diagramas de cajas entre la variable respuesta y la explicativa, vemos que la media suele ser parecida excepto en el caso de la pluviometría, lo cual podría deberse al hecho de que la presencia de agua es imprescindible en el ciclo vital del parásito.
+
+```{r out.width="75%"}
+par(mfrow=c(1,2))
+
+plot(as.numeric(Age), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Edad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Age)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Temperature), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Temperatura",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Temperature)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+```
+
+Por último, si se valora la relación media de la variable respuesta con respecto a las variables respuesta, las variables con un compotamiento más destacable son la edad de las vacas y la temperatura. Como vemos, a medida que aumenta la edad, la probabilidad de la presencia del parásito crece, pero a los 16 baja y luego tiene una bajada abrupta. Una razón posible sería que la presencia del parásito reduce la esperanza de vida de las vacas. En el caso de temperatura, a medida que esta aumenta decrece la presencia media del parásito. Esto se debe a que los aumentos de tempeatura correlacionan con el aumento de temperatura del agua y su evaporación, reduciendo la viabilidad del parásito en su estado larvario. Se pueden encontrar los gráficos de este tipo con respecto a todas las variables cuantitativas en el material suplementario.
+
+## Modelización
+
+Una vez realizado este análisis previo daremos paso a la modelización de dicho problema.
+
+Nuestra variable respuesta $\text{InfFasc}_i$ indica la presencia (1) o ausencia (0) del parásito en las $i=1,\ldots,400$ vacas analizadas.
+
+Como InfFasc es una variable binaria se distribuye como una Bernoulli de parámetro $\pi_i$, donde $\pi_i$ es la probabilidad de que una vaca $i$ tenga el parásito:
+
+$$\text{InfFasc}_i \sim \text{Ber}(\pi_i), ~~ i=1,\ldots,400.$$
+A la hora de elegir la mejor transformación para relacionar el predictor lineal con la respuesta media, compararemos los resultados sobre las transformaciones logit, probit y cloglog.
+
+```{r, echo=T, eval=T}
+ajuste.logit <- glm(InfFasc ~ ., data=datos, family = binomial(link="logit"))
+ajuste.probit <- glm(InfFasc ~ ., data=datos, family = binomial(link="probit"))
+ajuste.cloglog <- glm(InfFasc ~ ., data=datos, family = binomial(link="cloglog"))
+```
+
+Si comparamos la Deviance y el AIC asociados a cada una de las tres alternativas, obtenemos en
+ambos casos que el modelo que mejor resultado nos ofrece es la transformación logit. 
+
+```{r, echo=F, eval=T}
+x <- matrix(c(AIC(ajuste.logit), deviance(ajuste.logit),
+              AIC(ajuste.probit), deviance(ajuste.probit),
+              AIC(ajuste.cloglog), deviance(ajuste.cloglog)), nrow=3,byrow=T)
+colnames(x) <- c("AIC","Deviance")
+rownames(x) <- c("ajuste.logit", "ajuste.probit", "ajuste.cloglog")
+x
+```
+Por tanto, a partir de ahora trabajaremos con la transformación logit para buscar la mejor selección de variables explicativas y también para valorar la capacidad predictiva de nuestro modelo.
+
+Cuando trabajamos con datos binarios, la opción más adecuada para valorar si el ajuste que hemos realizado es correcto es el test de Hosmer y Lemeshow. Al realizar dicho test obtenemos un p-valor de 0.401, por tanto, asumimos que el ajuste es bueno. Como hemos hecho el test para el modelo completo y se cumplen las condiciones de aplicabilidad entonces para cualquier submodelo que estimemos también se cumplirán.
+
+```{r, echo=F, eval=F}
+library(ResourceSelection)
+hoslem.test(as.numeric(as.character(datos$InfFasc)), fitted(ajuste.logit))
+```
+```{r, eval=F, echo=F}
+maximo <- glm(InfFasc ~ ., family = binomial("logit"), data = datos)
+minimo <- glm(InfFasc ~ 1, family = binomial("logit"), data = datos)
+ajuste.step1 <- step(maximo, direction = "backward", scope = minimo)
+ajuste.step1$coefficients
+```
+
+Para seleccionar las variables de nuestro modelo hemos realizado un stepwise y hemos obtenido que las variables significativas son: Y, Aptitude, Temperature y Altitude. Así, la relación entre la respuesta media y el predictor lineal tiene la siguiente expresión:
+$$\text{logit}(\pi_i) = \beta_0 + \beta_1\text{Y}_i + \beta_2\text{Aptitude}_i + \beta_3\text{Temperature}_i + \beta_4\text{Altitude}_i$$ 
+
+```{r, eval=F, echo=F}
+ajuste.step <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos, 
+            family = binomial(link="logit"))
+summary(ajuste.step)
+```
+
+Al estimar este modelo obtenemos un AIC más bajo de 403.06 y una Deviance un pelín más alta de 393.06. Aunque en este estudio trabajaremos con la inferencia frecuentista, queremos plantear un modelo con algunas de las variables de nuestra base de datos (un factor y una covariable) con el lenguaje de programación WinBUGS. 
+
+```{r, echo = T, eval=F}
+modelo1 <- function(){
+  for(i in 1:N){
+  InfFasc[i] ~ dbern(p[i])
+    logit(p[i]) <- beta1 + beta2*Temperature[i] + beta.A[Aptitude[i]]
+  }
+  # distribuciones previas
+  beta1 ~ dflat()
+  beta2 ~ dflat()
+  beta.A[2] ~ dflat()
+  #restricción
+  beta.A[1] <- 0
+}
+set.seed(1)
+datos1 <- list(InfFasc=datos$InfFasc, Temperature=datos$Temperature,
+              Aptitude=as.numeric(datos$Aptitude),
+              N=dim(datos)[1])
+iniciales1 <- function(){
+  list(beta1=rnorm(1,0,3), beta2=rnorm(1), beta.A=c(NA,rnorm(1)))}
+parametros1 <- c("beta1", "beta2", "beta.A")
+ResulModelo1 <- bugs(model = modelo1, data = datos1, inits = iniciales1,
+                     param = parametros1, n.iter = 20000, n.burnin = 2000)
+```
+
+Al ejecutar este modelo y realizar inferencia bayesiana, obtenemos resultados muy equiparables con el que realizado con la inferencia frecuentista. Se pueden consultar en el material suplementario, donde además ejecutamos un modelo GLM con las mismas variables, permitiendo comprobar que los resultados son equiparables.
+
+Ahora partiremos del modelo obtenido mediante *step* y estudiaremos relaciones no lineales entre la variable respuesta y las covariables para intentar mejorarlo tanto en términos de ajuste como en términos de como predicen.
+
+En primer lugar, hemos añadido las variables con suavizado que no eran significativas cuando hemos realizado el stepwise. En todas las covariables hemos obtenido que los grados de libertad eran prácticamente 1 y además al realizar el gráfico del intervalo de confianza este contiene el valor 0 casi por todas partes. Por este motivo, decidimos no incluir estas covariables en nuestro modelo. 
+
+Entonces, tenemos como covariables las mismas que nos recomendaba el método stepwise: `Y`, `Aptitude`, `Temperature` y `Altitude.` Pero claro, en nuestras variables tenemos las coordenadas de localización `X` e `Y`. Es por ello que nos hemos planteado un nuevo modelo con estas covariables y un suavizado bivariante de `X` e `Y`. Al realizar este modelo, obtenemos un $R^2$ ajustado de 0.286 y una deviance explicada del 30.2$\%$. 
+
+Para mejorar este último modelo, pensamos que al tener como covariable la altitud de la granja también podemos pensar en suavizarla. Cuando hemos estimado este modelo, hemos obtenido un $R^2$ ajustado un ligeramente más elevado de 0.3 y una *deviance* explicada del 31.5$\%$.
+
+Finalmente el mejor modelo que hemos encontrado es el siguiente: 
+
+```{r, echo=TRUE}
+ajuste.gam1 <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=datos, 
+                  family = binomial(link="logit"))
+summary(ajuste.gam1)
+```
+
+Donde el $R^2$ ajustado vale 0.313 y el porcentaje de la deviance explicada es del $32.9\%$. Además, vemos que los grados de libertad para las dos variables suavizadas son menores que k-1 (en este caso utilizamos el valor de k por defecto), así que realmente el suavizado si que mejora el modelo. Antes de concluir comprobaremos que cumple las condiciones de aplicabilidad y después analizaremos la calidad de predicción.
+
+A parte, también nos planteamos añadir el suavizado bivariante de las variables temperatura y altitud, pero finalmente no mejoraba el modelo ni en términos de ajuste ni en calidad de predicción. 
+
+```{r}
+par(mfrow = c(2,2))
+gam.check(ajuste.gam1)
+```
+
+Observamos que se cumple la normalidad (gráfica superior izquierda), además los residuos deviance se encuentran entre -2 y 2 (gráfica superior derecha). Lo único que nos podría preocupar es que no tenemos una simetría clara en el histograma de los residuos, pero vemos que prácticamente están centrados en 0. Así, concluimos que el modelo cumple las condiciones de aplicabilidad. Además, observamos que el *k-index* es mayor que 1 y el p-valor mayor que 0.05, así los valores de k que nos da la función por defecto son adecuados para el suavizado de estas variables.
+
+
+## Evaluación de la capacidad predictiva de los modelos frecuentistas
+
+A continuación, realizaremos una valoración de la capacidad predictiva del modelo obtenido con *step* y del modelo aditivo mediante la división de los datos en una parte de entrenamiento (70%) y otra de testeo (30%). En primer lugar hemos obtenido la curva ROC de los modelos, obteniendo un área bajo la curva de 0.75 con un intervalo de confianza del 95% de 0.67 a 0.83 para el modelo aditivo.
+
+```{r echo=FALSE, message=FALSE, fig.height=5, fig.width=10}
+# Este código luego sale en la sección de código suplementario, está todo solo para la gráfica
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+
+curv_roc.glm <- roc(as.factor(test$InfFasc), p.glm)
+curv_roc.gam <- roc(as.factor(test$InfFasc), p.gam)
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```
+
+Además, decidimos obtener más estadísticos para decidirnos por un modelo u otro. Respecto al resto de estadísticos, la sensibilidad de ambos modelos es igual (90%), pero el modelo aditivo supera al GLM con una exactitud del 75%, especificidad de 41%, valor predictivo positivo del 79% y valor predictivo negativo de 0.61. En el caso de la especificidad, esta es muy superior en el aditivo (la del GLM es 17%). Por ello, a nivel predictivo nos inclinamos por elegir el modelo aditivo sobre el GLM.
+
+
+\newpage
+
+## Material suplementario
+
+## Figuras
+
+```{r echo = FALSE, message = FALSE, fig.height=7.5, fig.width=6.5}
+par(mfrow=c(3,2))
+
+plot(as.numeric(Age), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Edad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Age)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Temperature), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Temperatura",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Temperature)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Rainfall), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Pluviometría",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Rainfall)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Altitude), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Altitud",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Altitude)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Slope), jitter(as.numeric(InfFasc)-1, factor = 0.2), 
+     xlab = "Pendiente",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Slope)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Density), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Densidad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Density)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+```
+
+\newpage
+
+## Resultados de WinBugs y comparación con un modelo frecuentista equivalente
+
+\center
+\includegraphics{winbugsout.jpeg}
+
+```{r}
+modelo <- glm(InfFasc ~ Aptitude + Temperature,
+              data = datos,
+              family=binomial(link="logit"))
+summary(modelo)
+```
+
+\newpage
+
+### Calidad de precicción del modelo GLM
+
+```{r echo=FALSE, message=FALSE}
+# Dividimos los datos
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data = result.glm, reference = test$InfFasc)
+```
+
+### Calidad de precicción del modelo GAM
+
+```{r echo=FALSE, message=FALSE}
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data=result.gam, reference = test$InfFasc)
+```
+
+\newpage
+
+### Código
+
+```{r eval=FALSE, include=TRUE, echo=TRUE}
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(mgcv)
+library(psych)
+library(knitr)
+library(R2WinBUGS)
+library(caret)
+library(pROC)
+library(ResourceSelection)
+
+# Carga de los datos
+datos <- read.csv("data_galicia.txt", sep = " ")
+datos$Aptitude <- as.factor(datos$Aptitude)
+datos$InfFasc <- as.factor(datos$InfFasc)
+
+attach(datos)
+summary(datos[, c(1, 2, 4, 6, 7, 8, 9, 10)])
+summary(datos[, -c(1, 2, 4, 6, 7, 8, 9, 10)])
+
+
+ggpairs(datos)
+
+par(mfrow=c(3,2))
+plot(as.numeric(Age), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Edad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Age)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Temperature), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Temperatura",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Temperature)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Rainfall), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Pluviometría",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Rainfall)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Altitude), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Altitud",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Altitude)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Slope), jitter(as.numeric(InfFasc)-1, factor = 0.2), 
+     xlab = "Pendiente",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Slope)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+plot(as.numeric(Density), jitter(as.numeric(InfFasc)-1, factor = 0.2),
+     xlab = "Densidad",
+     ylab = "Presencia del parásito (0 = No, 1 = Sí)")
+tt <- table(InfFasc, Density)
+prc <- tt[2,] / (tt[1,] + tt[2,])
+lines(as.numeric(colnames(tt)), prc,type='b', col='RED')
+
+ajuste.logit <- glm(InfFasc ~ ., data=datos, family = binomial(link="logit"))
+ajuste.probit <- glm(InfFasc ~ ., data=datos, family = binomial(link="probit"))
+ajuste.cloglog <- glm(InfFasc ~ ., data=datos, family = binomial(link="cloglog"))
+
+x <- matrix(c(AIC(ajuste.logit), deviance(ajuste.logit),
+              AIC(ajuste.probit), deviance(ajuste.probit),
+              AIC(ajuste.cloglog), deviance(ajuste.cloglog)), nrow=3,byrow=T)
+colnames(x) <- c("AIC","Deviance")
+rownames(x) <- c("ajuste.logit", "ajuste.probit", "ajuste.cloglog")
+x
+
+hoslem.test(as.numeric(as.character(datos$InfFasc)), fitted(ajuste.logit))
+
+maximo <- glm(InfFasc ~ ., family = binomial("logit"), data = datos)
+minimo <- glm(InfFasc ~ 1, family = binomial("logit"), data = datos)
+ajuste.step1 <- step(maximo, direction = "backward", scope = minimo)
+ajuste.step1$coefficients
+
+ajuste.step <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos,
+            family = binomial(link="logit"))
+summary(ajuste.step)
+
+
+modelo1 <- function(){
+  for(i in 1:N){
+  InfFasc[i] ~ dbern(p[i])
+    logit(p[i]) <- beta1 + beta2*Temperature[i] + beta.A[Aptitude[i]]
+  }
+  # distribuciones previas
+  beta1 ~ dflat()
+  beta2 ~ dflat()
+  beta.A[2] ~ dflat()
+  #restricción
+  beta.A[1] <- 0
+}
+
+set.seed(1)
+datos1 <- list(InfFasc=datos$InfFasc, Temperature=datos$Temperature,
+              Aptitude=as.numeric(datos$Aptitude),
+              N=dim(datos)[1])
+iniciales1 <- function(){
+  list(beta1=rnorm(1,0,3), beta2=rnorm(1), beta.A=c(NA,rnorm(1)))
+  }
+parametros1 <- c("beta1", "beta2", "beta.A")
+ResulModelo1 <- bugs(model = modelo1, data = datos1, inits = iniciales1,
+                     param = parametros1, n.iter = 20000, n.burnin = 2000)
+
+ajuste.gam1 <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=datos, 
+                  family = binomial(link="logit"))
+summary(ajuste.gam1)
+
+par(mfrow = c(2,2))
+gam.check(ajuste.gam1)
+
+modelo <- glm(InfFasc ~ Aptitude + Temperature,
+              data = datos,
+              family=binomial(link="logit"))
+summary(modelo)
+
+# Análisis de la capacidad predictiva
+
+# Dividimos los datos
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+# Estadísticos de predicción para el GLM
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+                 family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+confusionMatrix(data = result.glm, reference = test$InfFasc)
+curv_roc.glm <- roc(as.factor(test$InfFasc), p.glm)
+
+# Estadísticos de predicción para el GAM
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                 family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+confusionMatrix(data=result.gam, reference = test$InfFasc)
+curv_roc.gam <- roc(as.factor(test$InfFasc), p.gam)
+
+# Representación curvas ROC
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```

@@ -1,0 +1,151 @@
+---
+title: "PRESENTACIÓN MODELIZACIÓN AVANZADA"
+Author:  "Gabriel Carbonell, Zaira García, Celia Sifre"
+Date: 16/06/2022
+output: beamer_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(out.width =  "0.9\\textwidth",  tidy=FALSE)
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(mgcv)
+library(psych)
+library(knitr)
+library(caret)
+library(pROC)
+
+# Carga de los datos
+datos <- read.csv("data_galicia.txt", sep = " ")
+datos$Aptitude <- as.factor(datos$Aptitude)
+datos$InfFasc <- as.factor(datos$InfFasc)
+```
+
+
+## Modelización (I)
+
+Nuestra variable respuesta $\text{InfFasc}_i$ indica la presencia (1) o ausencia (0) del parásito en las $i=1,\ldots,400$ vacas analizadas. Así, 
+$$\text{InfFasc}_i \sim \text{Ber}(\pi_i), ~~ i=1,\ldots,400.$$
+Donde $\pi_i$ es la probabilidad de que una vaca $i$ tenga el parásito. Parámetro de interés $\pi_i$. 
+
+## Modelización (II)
+
+Funciones Links posibles para nuestra variable respuesta:
+
+* Función logit, $logit(\pi) = \mathrm{log} \left( \frac{\pi}{1 - \pi} \right) = \beta_0 + \beta_1 x^1_i + \cdots + \beta_j x_i^j$
+* Función probit, $\phi^{-1} (\pi) = \beta_0 + \beta_1 x^1_i + \cdots + \beta_j x_i^j$.  \newline Donde, $\phi()$ representa la función de distribución acumulada de una normal estandard.
+* Log-log complementaria. $\mathrm{log}(- \mathrm{log}(1 - \pi)) = \beta_0 + \beta_1 x^1_i + \cdots + \beta_j x_i^j$.
+
+A la hora de elegir la mejor transformación para relacionar el predictor lineal con la respuesta media, hemos comparado la Deviance y el AIC de cada modelo asociado a una de las transformaciones. Finalmente, obtenemos en ambos casos que el modelo que mejor resultado nos ofrece es la transformación logit.
+
+
+## Modelización (III)
+
+\footnotesize
+```{r, echo=T, eval = F}
+summary(ajuste.step)
+```
+\center
+\includegraphics[scale = 0.5]{2022-06-16 (2).png}
+
+\normalsize
+Observamos que el AIC es de 403.06. Recordemos que al trabajar con la función glm estamos realizando inferencia frecuentista. Así, queremos presentar el modelo desde el punto de vista Bayesiano y recordar que siempre tenemos estas dos posibilidades. 
+
+## Inferencia Bayesiana (I)
+
+Planteamos el modelo con WinBUGS. Las covariables que consideramos son las obtenidas por stepwise. 
+
+\footnotesize
+```{r, echo = T, eval=F}
+modelo1 <- function(){
+  for(i in 1:N){
+  InfFasc[i] ~ dbern(p[i])
+    logit(p[i]) <- beta1 + beta2*Temperature[i] + 
+      beta3*Rainfall[i] + beta.A[Aptitude[i]]}
+  #distribuciones previas
+  beta1 ~ dflat()
+  beta2 ~ dflat()
+  beta3 ~ dflat()
+  beta.A[2] ~ dflat()
+  #restricción
+  beta.A[1] <- 0
+  }
+```
+
+## Inferencia Bayesiana (II)
+
+\footnotesize
+```{r, echo = T, eval = F}
+datos1 <- list(InfFasc=datos$InfFasc, 
+               Temperature=datos$Temperature, 
+               Rainfall=datos$Rainfall, 
+              Aptitude=as.numeric(datos$Aptitude),
+              N=dim(datos)[1])
+iniciales1 <- function(){
+  list(beta1=rnorm(1,0,2), beta2=rnorm(1,0,0.1), 
+       beta3=rnorm(1,0,0.01), beta.A=c(NA,rnorm(1)))
+}
+parametros1 <- c("beta1", "beta2", "beta3", "beta.A")
+ResulModelo1 <- bugs(model = modelo1, data = datos1, 
+                     inits = iniciales1,param = parametros1, 
+                     n.iter = 100000, n.burnin = 10000)
+```
+
+
+## Suavizado (I)
+
+\normalsize
+Así, el siguiente paso que realizamos es por una parte las variables no significativas añadirlas al modelo suavizadas y además las variables que vemos que están muy relacionadas incluirlas con una función suave bivariante. El mejor modelo obtenido añadiendo funciones suaves es:
+$$
+logit(\pi_i) = \beta_0 + f_1(X_i,Y_i) + \beta_1 \cdot Aptitude_i +  f_2(Altitude_i, Rainfall_i)
+$$
+
+Donde $f_1$ y $f_2$ son dos funciones suaves. 
+
+\footnotesize
+```{r, echo=TRUE}
+ajuste.gam1 <- gam(InfFasc ~ s(X,Y) + Aptitude + 
+                     te(Altitude, Rainfall), data=datos, 
+                  family = binomial(link="logit"))
+```
+
+## Suavizado (II)
+
+\footnotesize
+```{r, echo = F, eval = F}
+summary(ajuste.gam1)
+```
+
+\center
+\includegraphics[scale = 0.6]{2022-06-16 (3).png}
+
+
+## Aplicabilidad (I)
+
+```{r, echo = F, eval=FALSE}
+par(mfrow = c(2,2))
+gam.check(ajuste.gam1)
+```
+
+\center
+\includegraphics[scale = 0.6]{2022-06-16 (1).png}
+
+## Aplicabilidad (II)
+
+\center
+\includegraphics[scale = 0.6]{2022-06-16.png}
+
+## Calidad de predicción (I)
+
+Curvas ROC de los modelos frecuentistas
+
+\center
+\includegraphics[scale = 0.6]{roc.png}
+
+## Calidad de predicción (II)
+
+\center
+\includegraphics[scale = 0.6]{estadisticos-pred.png}
+
+

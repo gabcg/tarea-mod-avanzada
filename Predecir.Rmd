@@ -7,21 +7,133 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-
+library(mgcv)
 library(caret)
+library(pROC)
 library(boot)
-```
 
-## R Markdown
+# Carga de los datos
+datos <- read.csv("./datos/data_galicia.txt", sep = " ")
+datos$Aptitude <- as.factor(datos$Aptitude)
+datos$InfFasc <- as.factor(datos$InfFasc)
 
-```{r}
+attach(datos)
+
+
 ajuste.gam1 <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=datos, 
                   family = binomial(link="logit"))
 ajuste.step <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos, 
             family = binomial(link="logit"))
 ```
 
+## Evaluación de la capacidad predictiva
 
+A continuación, realizaremos una valoración de la capacidad predictiva del modelo obtenido con *step* y del modelo aditivo mediante la división de los datos en una parte de entrenamiento (70%) y otra de testeo (30%). En primer lugar hemos obtenido la curva ROC de los modelos, obteniendo un área bajo la curva de 0.75 con un intervalo de confianza del 95% de 0.65-0.84 para ambos. Por ello, decidimos obtener más estadísticos para decidirnos por un modelo u otro.
+
+```{r echo=FALSE, message=FALSE}
+# Código para gráfica ROC en informe/supl, es el mismo que más abajo
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+
+curv_roc.glm <- roc(as.factor(test$InfFasc), p.glm)
+curv_roc.gam <- roc(as.factor(test$InfFasc), p.gam)
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```
+
+
+Respecto al resto de estadísticos, la sensibilidad de ambos modelos es igual (0.90), pero el modelo aditivo supera al GLM con una exactitud del 75%, especificidad de 0.41, valor predictivo positivo del 0.79 y valor predictivo negativo de 0.61. En el caso de la especificidad, esta es muy superior en el aditivo (la del GLM es 0.17). Por ello, a nivel predictivo nos inclinamos por elegir el modelo aditivo sobre el GLM.
+
+
+## Para material suplementario
+
+### Calidad de precicción del modelo GLM
+
+```{r echo=FALSE, message=FALSE}
+# Dividimos los datos
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data = result.glm, reference = test$InfFasc)
+```
+
+### Calidad de precicción del modelo GAM
+
+```{r echo=FALSE, message=FALSE}
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+
+# Matriz de confusión
+confusionMatrix(data=result.gam, reference = test$InfFasc)
+```
+
+
+
+## Añadir al cógigo en mat. supl
+
+
+```{r}
+# Dividimos los datos
+set.seed(123)
+split <- sample(c(rep(0, 0.7 * nrow(datos)), rep(1, 0.3 * nrow(datos))))
+train <- datos[split == 0, ] 
+test <- datos[split == 1, ]
+
+# Estadísticos de predicción para el GLM
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
+            family = binomial(link="logit"))
+
+p.glm <- predict(train.glm, newdata=test, type='response')
+result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
+confusionMatrix(data = result.glm, reference = test$InfFasc)
+curv_roc.glm <- roc(as.factor(test$InfFasc), p.glm)
+
+# Estadísticos de predicción para el GAM
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
+                  family = binomial(link="logit"))
+
+p.gam <- predict(train.gam, newdata=test, type='response')
+result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
+confusionMatrix(data=result.gam, reference = test$InfFasc)
+curv_roc.gam <- roc(as.factor(test$InfFasc), p.gam)
+
+# Representación curvas ROC
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```
+
+
+
+
+## Análisis CV train/set
 
 ```{r}
 # Dividimos los datos
@@ -32,18 +144,18 @@ test <- datos[split == 1, ]
 ```
 
 ```{r}
-train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=test, 
+train.gam <- gam(InfFasc ~ s(X,Y) + Aptitude + te(Altitude, Rainfall), data=train, 
                   family = binomial(link="logit"))
 
 p.gam <- predict(train.gam, newdata=test, type='response')
 result.gam <- as.factor(ifelse(p.gam > 0.5, 1, 0))
 
 # Matriz de confusión
-confusionMatrix(data=result, reference = test$InfFasc)
+confusionMatrix(data=result.gam, reference = test$InfFasc)
 ```
 
 ```{r}
-train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=datos, 
+train.glm <- glm(InfFasc ~ Y + Aptitude + Temperature + Altitude, data=train, 
             family = binomial(link="logit"))
 
 p.glm <- predict(train.glm, newdata=test, type='response')
@@ -51,6 +163,45 @@ result.glm <- as.factor(ifelse(p.glm > 0.5, 1, 0))
 
 # Matriz de confusión
 confusionMatrix(data = result.glm, reference = test$InfFasc)
+```
+
+### Curvas ROC
+
+```{r}
+curv_roc.glm <- roc(as.factor(test$InfFasc), p.glm)
+curv_roc.gam <- roc(as.factor(test$InfFasc), p.gam)
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```
+
+```{r}
+curv_roc.glm$auc
+ci(curv_roc.glm)
+curv_roc.gam$auc
+ci(curv_roc.gam)
+```
+
+## Curvas ROC sin train/set
+
+```{r}
+curv_roc.glm <- roc(as.factor(datos$InfFasc), pred.values.glm)
+pred.values.gam <- predict(ajuste.gam1, type="response")
+curv_roc.gam <- roc(as.factor(datos$InfFasc), pred.values.gam)
+par(mfrow=c(1, 2))
+plot(curv_roc.glm, xlim=c(1,0), main = "GLM")
+plot(curv_roc.gam, xlim=c(1,0), main = "GAM")
+```
+
+**Comparación numérica**
+
+curv_roc$auc
+
+```{r}
+curv_roc.glm$auc
+ci(curv_roc.glm)
+curv_roc.gam$auc
+ci(curv_roc.gam)
 ```
 
 
@@ -72,4 +223,6 @@ result.cv.gam$delta
 result.cv.glm.2$delta
 result.cv.gam.2$delta
 ```
+
+
 

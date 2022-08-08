@@ -1,0 +1,53 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# Paths (añadir a cualquier Rmd o script con el que se quiera usar WinBugs)
+bdir <- "/Users/gab/Applications/Wineskin/WinBUGS.app/Contents/SharedSupport/prefix/drive_c/Program Files/WinBUGS14"
+wine <- "/Users/gab/Applications/Wineskin/WinBUGS.app/Contents/SharedSupport/wine/bin/wine64"
+winepath <- "/Users/gab/Applications/Wineskin/WinBUGS.app/Contents/SharedSupport/wine/bin/winepath" 
+
+# Al llamar a bugs(), añadir siempre:
+## bugs(..., bugs.directory = bdir, WINE = wine, WINEPATH = winepath)
+```
+
+
+
+```{r}
+library(R2WinBUGS)
+modelo1 <- function(){
+  for(i in 1:N){
+  InfFasc[i] ~ dbern(p[i])
+    logit(p[i]) <- beta1 + beta2*Y[i] + beta3*Temperature[i] + beta4*Altitude[i]
+                   + beta.A[Aptitude[i]]
+  }
+  # distribuciones previas
+  beta1 ~ dnorm(0.0,1.0E-6)
+  beta2 ~ dnorm(0.0,1.0E-6)
+  beta3 ~ dnorm(0.0,1.0E-6)
+  beta4 ~ dnorm(0.0,1.0E-6)
+  beta.A[2] ~ dflat()
+  #restricción
+  beta.A[1] <- 0
+}
+set.seed(1)
+datos1 <- list(InfFasc=datos$InfFasc, Temperature=datos$Temperature,
+              Altitude=datos$Altitude, Aptitude=as.numeric(datos$Aptitude),
+              Y=datos$Y, N=dim(datos)[1])
+iniciales1 <- function(){
+  list(beta1=rnorm(1), beta2=rnorm(1,0,0.01), beta3=rnorm(1,0,2), 
+       beta4=rnorm(1,0,0.001), beta.A=c(NA,rnorm(1)))}
+parametros1 <- c("beta1", "beta2", "beta3", "beta4", "beta.A")
+ResulModelo1 <- bugs(model = modelo1, data = datos1, inits = iniciales1,
+                     param = parametros1,
+                     bugs.directory = bdir, WINE = wine, WINEPATH = winepath)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
